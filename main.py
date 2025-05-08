@@ -41,8 +41,6 @@ def send_email(subject, body):
 
 def main():
 
-    send_email("【テスト】Discogs通知システム動作確認", "これはテストメールです。メール通知機能は正常に動作しています。")
-
     ids = get_wantlist_ids()
     print(f"取得したWantlistのID一覧: {ids}")
 
