@@ -9,15 +9,30 @@ EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 
+# この関数を既存の get_wantlist_ids() と置き換えてください
 def get_wantlist_ids():
-    url = f'https://api.discogs.com/users/{USER_NAME}/wants'
-    headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        print("❌ Wantlist取得に失敗しました")
-        return []
-    wants = response.json().get('wants', [])
-    return [item['basic_information']['id'] for item in wants]
+    ids = []
+    page = 1
+    while True:
+        url = f'https://api.discogs.com/users/{USER_NAME}/wants?page={page}&per_page=100'
+        headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            print("❌ Wantlist取得に失敗しました")
+            break
+
+        wants = response.json().get('wants', [])
+        if not wants:
+            break
+
+        page_ids = [item['basic_information']['id'] for item in wants]
+        ids.extend(page_ids)
+
+        if len(wants) < 100:
+            break  # 最終ページ
+        page += 1
+
+    return ids
 
 def check_marketplace(item_id):
     url = f'https://api.discogs.com/marketplace/search?release_id={item_id}&sort=listed,desc'
