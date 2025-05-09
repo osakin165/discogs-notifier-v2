@@ -54,6 +54,18 @@ def send_email(subject, body):
     except Exception as e:
         print(f"❌ メール送信に失敗しました: {e}")
 
+def send_discord(message):
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    payload = {"content": message}
+    try:
+        response = requests.post(webhook_url, json=payload)
+        if response.status_code == 204:
+            print("✅ Discord通知を送信しました。")
+        else:
+            print(f"❌ Discord通知に失敗しました: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Discord送信エラー: {e}")
+        
 def main():
 
     ids = get_wantlist_ids()
@@ -75,14 +87,3 @@ def main():
 if __name__ == '__main__':
     main()
 
-def send_discord(message):
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
-    payload = {"content": message}
-    try:
-        response = requests.post(webhook_url, json=payload)
-        if response.status_code == 204:
-            print("✅ Discord通知を送信しました。")
-        else:
-            print(f"❌ Discord通知に失敗しました: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Discord送信エラー: {e}")
