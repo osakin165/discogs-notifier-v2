@@ -67,9 +67,22 @@ def main():
             uri = listings[0]["uri"]
             message = f"💿 Wantlistに新しい商品が出品されました！\n{title}\n{uri}"
             send_email("【DISCOGS】Wantlist新着商品あり", message)
+            send_discord(message)  # Discordに通知
             break
         else:
             print("📭 出品が見つかりませんでした。")
 
 if __name__ == '__main__':
     main()
+
+def send_discord(message):
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    payload = {"content": message}
+    try:
+        response = requests.post(webhook_url, json=payload)
+        if response.status_code == 204:
+            print("✅ Discord通知を送信しました。")
+        else:
+            print(f"❌ Discord通知に失敗しました: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Discord送信エラー: {e}")
