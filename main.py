@@ -12,9 +12,10 @@ EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-# JSTの当日の日付を取得
+# JSTの当日と前日の日付を取得
 JST = timezone(timedelta(hours=9))
 TODAY_JST = datetime.now(JST).date()
+YESTERDAY_JST = TODAY_JST - timedelta(days=1)
 
 def get_wantlist_items():
     items = []
@@ -46,7 +47,7 @@ def get_wantlist_items():
 
     return items
 
-def get_today_listings(release_id):
+def get_recent_listings(release_id):
     url = f'https://api.discogs.com/marketplace/search?release_id={release_id}&sort=listed,desc'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
@@ -57,18 +58,18 @@ def get_today_listings(release_id):
         return []
 
     listings = response.json().get('results', [])
-    today_listed = []
+    recent_listed = []
     for item in listings:
-        listed_str = item.get('date_listed')  # UTC ISO8601
+        listed_str = item.get('date_listed')
         try:
             listed_dt = datetime.strptime(listed_str, "%Y-%m-%dT%H:%M:%S%z")
             listed_jst = listed_dt.astimezone(JST)
-            if listed_jst.date() == TODAY_JST:
-                today_listed.append(item)
+            if listed_jst.date() in [TODAY_JST, YESTERDAY_JST]:
+                recent_listed.append(item)
         except Exception as e:
             print(f"⚠️ 日付パースエラー: {e}")
 
-    return today_listed
+    return recent_listed
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -107,14 +108,14 @@ def main():
         artist = item['artist']
         uri = item['uri']
 
-        today_items = get_today_listings(release_id)
+        recent_items = get_recent_listings(release_id)
         time.sleep(1)
 
-        for listing in today_items:
+        for listing in recent_items:
             price = listing.get('price', {}).get('value', '?')
             currency = listing.get('price', {}).get('currency', '')
-            message = f"💿 本日新着の出品が見つかりました！\n{title} - {artist}\n{listing['uri']}\n価格: {price} {currency}"
-            send_email("【DISCOGS】本日新着出品のお知らせ", message)
+            message = f"💿 新着出品が見つかりました（当日＋前日）！\n{title} - {artist}\n{listing['uri']}\n価格: {price} {currency}"
+            send_email("【DISCOGS】新着出品のお知らせ", message)
             send_discord(message)
 
 if __name__ == '__main__':
