@@ -42,12 +42,12 @@ def get_wantlist_items():
 
     return items
 
-def check_marketplace_by_title_artist(title, artist):
-    url = f'https://api.discogs.com/marketplace/search?artist={artist}&release_title={title}&sort=listed,desc'
+def check_marketplace_by_keywords(query):
+    url = f'https://api.discogs.com/marketplace/search?q={query}&sort=listed,desc'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
 
-    print(f"🔍 Searching Marketplace for: {artist} - {title}")
+    print(f"🔍 Searching Marketplace for: {query}")
     print(f"📦 API Response: {response.status_code}")
     try:
         print(response.json())
@@ -95,7 +95,8 @@ def main():
         artist = item['artist']
         uri = item['uri']
 
-        listings = check_marketplace_by_title_artist(title, artist)
+        query = f"{artist} {title}"
+        listings = check_marketplace_by_keywords(query)
         time.sleep(2)
         if listings:
             first = listings[0]
@@ -108,4 +109,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
