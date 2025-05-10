@@ -80,6 +80,7 @@ def main():
     for item_id in ids:
         print(f"🔍 Checking item_id: {item_id}")
         listings = check_marketplace(item_id)
+        time.sleep(2)  # ← ここで2秒待つ（Discogs推奨）
         if listings:
             title = listings[0]["title"]
             uri = listings[0]["uri"]
