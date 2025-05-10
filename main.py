@@ -38,6 +38,12 @@ def check_marketplace(item_id):
     url = f'https://api.discogs.com/marketplace/search?release_id={item_id}&sort=listed,desc'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
+    
+    # ログ出力：何が返ってきてるか確認
+    print(f"🔍 Checking item_id: {item_id}")
+    print(f"📦 API Response: {response.status_code}")
+    print(response.json())  # ← ここで中身を全部表示！
+
     return response.json().get('results', [])
 
 def send_email(subject, body):
