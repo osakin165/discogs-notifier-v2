@@ -9,8 +9,6 @@ USER_NAME = os.getenv("USER_NAME")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
-
-# Discord通知を使う場合のみ設定
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 def get_wantlist_items():
@@ -31,10 +29,11 @@ def get_wantlist_items():
 
         for item in wants:
             info = item['basic_information']
+            release_id = info.get('id')
             title = info.get('title')
             artists = ', '.join([a['name'] for a in info.get('artists', [])])
             uri = info.get('resource_url')
-            items.append({'title': title, 'artist': artists, 'uri': uri})
+            items.append({'release_id': release_id, 'title': title, 'artist': artists, 'uri': uri})
 
         if len(wants) < 100:
             break
@@ -42,22 +41,19 @@ def get_wantlist_items():
 
     return items
 
-def check_marketplace_by_keywords(query):
-    url = f'https://api.discogs.com/marketplace/search?q={query}&sort=listed,desc'
+def check_num_for_sale(release_id):
+    url = f'https://api.discogs.com/releases/{release_id}'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
 
-    print(f"🔍 Searching Marketplace for: {query}")
+    print(f"🔍 Checking release_id: {release_id}")
     print(f"📦 API Response: {response.status_code}")
-    try:
-        print(response.json())
-    except:
-        print("⚠️ JSON decode error")
 
     if response.status_code != 200:
-        return []
+        return 0
 
-    return response.json().get('results', [])
+    data = response.json()
+    return data.get('num_for_sale', 0)
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -91,19 +87,19 @@ def main():
     print(f"取得したWantlist件数: {len(items)}")
 
     for item in items:
+        release_id = item['release_id']
         title = item['title']
         artist = item['artist']
         uri = item['uri']
 
-        query = f"{artist} {title}"
-        listings = check_marketplace_by_keywords(query)
+        num_for_sale = check_num_for_sale(release_id)
         time.sleep(2)
-        if listings:
-            first = listings[0]
-            message = f"💿 Wantlistに新しい商品が出品されました！\n{title} - {artist}\n{first['uri']}"
-            send_email("【DISCOGS】Wantlist新着商品あり", message)
+
+        if num_for_sale > 0:
+            message = f"💿 Wantlistに新しい商品が出品されています！\n{title} - {artist}\n{uri}\n出品数: {num_for_sale}"
+            send_email("【DISCOGS】Wantlist出品通知", message)
             send_discord(message)
-            break  # 最初の1件で通知終了
+            break
         else:
             print("📭 出品が見つかりませんでした。")
 
