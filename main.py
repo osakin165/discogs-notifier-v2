@@ -1,3 +1,4 @@
+import time  # ← これを最上部に追加！
 import requests
 import smtplib
 from email.mime.text import MIMEText
