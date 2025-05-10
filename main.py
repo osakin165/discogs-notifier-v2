@@ -3,6 +3,7 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 import os
+from datetime import datetime, timezone, timedelta
 
 DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
 USER_NAME = os.getenv("USER_NAME")
@@ -10,6 +11,10 @@ EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# JSTの当日の日付を取得
+JST = timezone(timedelta(hours=9))
+TODAY_JST = datetime.now(JST).date()
 
 def get_wantlist_items():
     items = []
@@ -41,19 +46,29 @@ def get_wantlist_items():
 
     return items
 
-def check_num_for_sale(release_id):
-    url = f'https://api.discogs.com/releases/{release_id}'
+def get_today_listings(release_id):
+    url = f'https://api.discogs.com/marketplace/search?release_id={release_id}&sort=listed,desc'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
-
     print(f"🔍 Checking release_id: {release_id}")
     print(f"📦 API Response: {response.status_code}")
 
     if response.status_code != 200:
-        return 0
+        return []
 
-    data = response.json()
-    return data.get('num_for_sale', 0)
+    listings = response.json().get('results', [])
+    today_listed = []
+    for item in listings:
+        listed_str = item.get('date_listed')  # UTC ISO8601
+        try:
+            listed_dt = datetime.strptime(listed_str, "%Y-%m-%dT%H:%M:%S%z")
+            listed_jst = listed_dt.astimezone(JST)
+            if listed_jst.date() == TODAY_JST:
+                today_listed.append(item)
+        except Exception as e:
+            print(f"⚠️ 日付パースエラー: {e}")
+
+    return today_listed
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -92,16 +107,15 @@ def main():
         artist = item['artist']
         uri = item['uri']
 
-        num_for_sale = check_num_for_sale(release_id)
-        time.sleep(2)
+        today_items = get_today_listings(release_id)
+        time.sleep(1)
 
-        if num_for_sale > 0:
-            message = f"💿 Wantlistに新しい商品が出品されています！\n{title} - {artist}\n{uri}\n出品数: {num_for_sale}"
-            send_email("【DISCOGS】Wantlist出品通知", message)
+        for listing in today_items:
+            price = listing.get('price', {}).get('value', '?')
+            currency = listing.get('price', {}).get('currency', '')
+            message = f"💿 本日新着の出品が見つかりました！\n{title} - {artist}\n{listing['uri']}\n価格: {price} {currency}"
+            send_email("【DISCOGS】本日新着出品のお知らせ", message)
             send_discord(message)
-            break
-        else:
-            print("📭 出品が見つかりませんでした。")
 
 if __name__ == '__main__':
     main()
