@@ -1,4 +1,4 @@
-import time  # ← これを最上部に追加！
+import time
 import requests
 import smtplib
 from email.mime.text import MIMEText
@@ -10,14 +10,17 @@ EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 
-# この関数を既存の get_wantlist_ids() と置き換えてください
-def get_wantlist_ids():
-    ids = []
+# Discord通知を使う場合のみ設定
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+def get_wantlist_items():
+    items = []
     page = 1
     while True:
         url = f'https://api.discogs.com/users/{USER_NAME}/wants?page={page}&per_page=100'
         headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
         response = requests.get(url, headers=headers)
+
         if response.status_code != 200:
             print("❌ Wantlist取得に失敗しました")
             break
@@ -26,24 +29,33 @@ def get_wantlist_ids():
         if not wants:
             break
 
-        page_ids = [item['basic_information']['id'] for item in wants]
-        ids.extend(page_ids)
+        for item in wants:
+            info = item['basic_information']
+            title = info.get('title')
+            artists = ', '.join([a['name'] for a in info.get('artists', [])])
+            uri = info.get('resource_url')
+            items.append({'title': title, 'artist': artists, 'uri': uri})
 
         if len(wants) < 100:
-            break  # 最終ページ
+            break
         page += 1
 
-    return ids
+    return items
 
-def check_marketplace(item_id):
-    url = f'https://api.discogs.com/marketplace/search?release_id={item_id}&sort=listed,desc'
+def check_marketplace_by_title_artist(title, artist):
+    url = f'https://api.discogs.com/marketplace/search?artist={artist}&release_title={title}&sort=listed,desc'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     response = requests.get(url, headers=headers)
-    
-    # ログ出力：何が返ってきてるか確認
-    print(f"🔍 Checking item_id: {item_id}")
+
+    print(f"🔍 Searching Marketplace for: {artist} - {title}")
     print(f"📦 API Response: {response.status_code}")
-    print(response.json())  # ← ここで中身を全部表示！
+    try:
+        print(response.json())
+    except:
+        print("⚠️ JSON decode error")
+
+    if response.status_code != 200:
+        return []
 
     return response.json().get('results', [])
 
@@ -62,33 +74,35 @@ def send_email(subject, body):
         print(f"❌ メール送信に失敗しました: {e}")
 
 def send_discord(message):
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not DISCORD_WEBHOOK_URL:
+        return
     payload = {"content": message}
     try:
-        response = requests.post(webhook_url, json=payload)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
         if response.status_code == 204:
             print("✅ Discord通知を送信しました。")
         else:
             print(f"❌ Discord通知に失敗しました: {response.status_code}")
     except Exception as e:
         print(f"❌ Discord送信エラー: {e}")
-        
+
 def main():
+    items = get_wantlist_items()
+    print(f"取得したWantlist件数: {len(items)}")
 
-    ids = get_wantlist_ids()
-    print(f"取得したWantlistのID一覧: {ids}")
+    for item in items:
+        title = item['title']
+        artist = item['artist']
+        uri = item['uri']
 
-    for item_id in ids:
-        print(f"🔍 Checking item_id: {item_id}")
-        listings = check_marketplace(item_id)
-        time.sleep(2)  # ← ここで2秒待つ（Discogs推奨）
+        listings = check_marketplace_by_title_artist(title, artist)
+        time.sleep(2)
         if listings:
-            title = listings[0]["title"]
-            uri = listings[0]["uri"]
-            message = f"💿 Wantlistに新しい商品が出品されました！\n{title}\n{uri}"
+            first = listings[0]
+            message = f"💿 Wantlistに新しい商品が出品されました！\n{title} - {artist}\n{first['uri']}"
             send_email("【DISCOGS】Wantlist新着商品あり", message)
-            send_discord(message)  # Discordに通知
-            break
+            send_discord(message)
+            break  # 最初の1件で通知終了
         else:
             print("📭 出品が見つかりませんでした。")
 
