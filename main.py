@@ -58,24 +58,30 @@ def get_wantlist_items():
 
     return items
 
-def get_num_for_sale(release_id):
+def get_num_for_sale(release_id, retries=3):
     url = f'https://api.discogs.com/releases/{release_id}'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
-    try:
-        response = requests.get(url, headers=headers)
-        print(f"🔍 Checking release_id: {release_id}")
-        print(f"📦 API Response: {response.status_code}")
 
-        if response.status_code != 200:
-            print(response.text)
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=headers)
+            print(f"🔍 Checking release_id: {release_id}")
+            print(f"📦 API Response: {response.status_code}")
+
+            if response.status_code == 200:
+                return response.json().get("num_for_sale", 0)
+            elif response.status_code == 429:
+                print("⚠️ 429エラー：5秒待って再試行します...")
+                time.sleep(5)
+            else:
+                print(response.text)
+                return 0
+        except Exception as e:
+            print(f"⚠️ エラーが発生しました: {e}")
             return 0
 
-        data = response.json()
-        return data.get("num_for_sale", 0)
-
-    except Exception as e:
-        print(f"⚠️ エラーが発生しました: {e}")
-        return 0
+    print("❌ リトライ上限を超えたためスキップします。")
+    return 0
 
 def send_email(subject, body):
     msg = MIMEText(body)
@@ -137,3 +143,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
