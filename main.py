@@ -109,6 +109,8 @@ def main():
     items = get_wantlist_items()
     print(f"取得したWantlist件数: {len(items)}")
 
+    messages = []
+
     for item in items:
         release_id = str(item['release_id'])
         title = item['title']
@@ -120,12 +122,16 @@ def main():
 
         prev_count = notified_counts.get(release_id, 0)
         if num_for_sale > prev_count:
-            message = f"💿 新しい出品が追加されました！\n{title} - {artist}\n{uri}\n現在の出品数: {num_for_sale} (前回: {prev_count})"
-            send_email("【DISCOGS】出品追加通知", message)
-            send_discord(message)
+            msg = f"💿 {title} - {artist}\n{uri}\n出品数: {num_for_sale} (前回: {prev_count})\n"
+            messages.append(msg)
 
         # 出品数が減った場合でも記録を更新しておく
         notified_counts[release_id] = num_for_sale
+
+    if messages:
+        full_message = "\n".join(messages)
+        send_email("【DISCOGS】出品追加まとめ通知", full_message)
+        send_discord(full_message)
 
     save_notified_counts(notified_counts)
 
