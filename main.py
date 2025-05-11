@@ -3,6 +3,7 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 import os
+import json
 from datetime import datetime, timezone, timedelta
 
 DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
@@ -12,9 +13,20 @@ EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
+RECORD_FILE = "notified_counts.json"
 JST = timezone(timedelta(hours=9))
-TODAY_JST = datetime.now(JST).date()
-YESTERDAY_JST = TODAY_JST - timedelta(days=1)
+
+# 通知履歴の読み込み（初回は空）
+def load_notified_counts():
+    if os.path.exists(RECORD_FILE):
+        with open(RECORD_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+# 通知履歴の保存
+def save_notified_counts(data):
+    with open(RECORD_FILE, 'w') as f:
+        json.dump(data, f)
 
 def get_wantlist_items():
     items = []
@@ -93,11 +105,12 @@ def send_discord(message):
         print(f"❌ Discord送信エラー: {e}")
 
 def main():
+    notified_counts = load_notified_counts()
     items = get_wantlist_items()
     print(f"取得したWantlist件数: {len(items)}")
 
     for item in items:
-        release_id = item['release_id']
+        release_id = str(item['release_id'])
         title = item['title']
         artist = item['artist']
         uri = item['uri']
@@ -105,10 +118,16 @@ def main():
         num_for_sale = get_num_for_sale(release_id)
         time.sleep(1)
 
-        if num_for_sale > 0:
-            message = f"💿 出品中の商品があります！\n{title} - {artist}\n{uri}\n現在の出品数: {num_for_sale}"
-            send_email("【DISCOGS】Wantlist出品通知", message)
+        prev_count = notified_counts.get(release_id, 0)
+        if num_for_sale > prev_count:
+            message = f"💿 新しい出品が追加されました！\n{title} - {artist}\n{uri}\n現在の出品数: {num_for_sale} (前回: {prev_count})"
+            send_email("【DISCOGS】出品追加通知", message)
             send_discord(message)
+
+        # 出品数が減った場合でも記録を更新しておく
+        notified_counts[release_id] = num_for_sale
+
+    save_notified_counts(notified_counts)
 
 if __name__ == '__main__':
     main()
