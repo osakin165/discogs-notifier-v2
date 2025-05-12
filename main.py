@@ -1,32 +1,38 @@
-import time
-import requests
-import smtplib
-from email.mime.text import MIMEText
 import os
+import time
+import smtplib
+import requests
 import json
+from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
-USER_NAME = os.getenv("USER_NAME")
+# Firebase 初期化（Render の Secret File 経由で読み込み）
+cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+# メール設定
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_TO = os.getenv("EMAIL_TO")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
+DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
+USER_NAME = os.getenv("USER_NAME")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-RECORD_FILE = "notified_counts.json"
 JST = timezone(timedelta(hours=9))
 
-# 通知履歴の読み込み（初回は空）
+# Firestore: 通知済み出品数の読み込み
 def load_notified_counts():
-    if os.path.exists(RECORD_FILE):
-        with open(RECORD_FILE, 'r') as f:
-            return json.load(f)
+    doc = db.collection("discogs").document("notified_counts").get()
+    if doc.exists:
+        return doc.to_dict()
     return {}
 
-# 通知履歴の保存
+# Firestore: 通知済み出品数の保存
 def save_notified_counts(data):
-    with open(RECORD_FILE, 'w') as f:
-        json.dump(data, f)
+    db.collection("discogs").document("notified_counts").set(data)
 
 def get_wantlist_items():
     items = []
@@ -143,4 +149,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
