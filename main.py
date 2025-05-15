@@ -1,141 +1,153 @@
 import os
 import time
-import smtplib
 import requests
-import json
-from email.mime.text import MIMEText
-from datetime import datetime, timezone, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore
+from email.mime.text import MIMEText
+import smtplib
+from datetime import datetime
+import pytz
 
-# --- Firebase 初期化 ---
-cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+# —————— Firebase 初期化 ——————
+cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+cred = credentials.Certificate(cred_path)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- 環境変数 ---
-EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO")
-EMAIL_PASS = os.getenv("EMAIL_PASS")
-DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
-USER_NAME = os.getenv("USER_NAME")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-
-# --- JST 設定 ---
-JST = timezone(timedelta(hours=9))
-
-# --- Firestore から通知履歴を読み込み ---
 def load_notified_counts():
     doc = db.collection("discogs").document("notified_counts").get()
     if doc.exists:
         return doc.to_dict()
     return {}
 
-# --- Firestore に通知履歴を保存 ---
 def save_notified_counts(data):
     db.collection("discogs").document("notified_counts").set(data)
 
-# --- Wantlist のリリース情報取得 ---
-def get_wantlist_items():
-    items = []
-    page = 1
+# —————— 設定読み込み ——————
+DISCOGS_TOKEN = os.getenv("DISCOGS_TOKEN")
+USER_NAME      = os.getenv("USER_NAME")
+EMAIL_FROM     = os.getenv("EMAIL_FROM")
+EMAIL_TO       = os.getenv("EMAIL_TO")
+EMAIL_PASS     = os.getenv("EMAIL_PASS")
+DISCORD_WEBHOOK= os.getenv("DISCORD_WEBHOOK_URL")
+
+JST = pytz.timezone("Asia/Tokyo")
+
+# —————— wantlist取得 ——————
+def get_wantlist_ids():
+    ids, page = [], 1
+    headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
     while True:
         url = f'https://api.discogs.com/users/{USER_NAME}/wants?page={page}&per_page=100'
-        headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
-        resp = requests.get(url, headers=headers)
-        if resp.status_code != 200:
-            print("❌ Wantlist取得に失敗しました", resp.status_code)
-            break
-        wants = resp.json().get('wants', [])
-        if not wants:
-            break
-        for w in wants:
-            info = w['basic_information']
-            rid = info['id']
-            title = info['title']
-            artists = ', '.join(a['name'] for a in info.get('artists', []))
-            uri = f"https://www.discogs.com/release/{rid}"
-            items.append({'release_id': rid, 'title': title, 'artist': artists, 'uri': uri})
-        if len(wants) < 100:
-            break
+        res = requests.get(url, headers=headers)
+        if res.status_code != 200: break
+        wants = res.json().get('wants', [])
+        if not wants: break
+        ids += [item['basic_information']['id'] for item in wants]
+        if len(wants)<100: break
         page += 1
-    return items
+    return ids
 
-# --- リリースごとの出品数取得（リトライ付き） ---
+# —————— num_for_sale取得（リトライ付き） ——————
 def get_num_for_sale(release_id, retries=3):
     url = f'https://api.discogs.com/releases/{release_id}'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
-    for i in range(retries):
-        r = requests.get(url, headers=headers)
-        print(f"🔍 Checking release_id: {release_id}")
-        print(f"📦 API Response: {r.status_code}")
-        if r.status_code == 200:
-            return r.json().get('num_for_sale', 0)
-        if r.status_code == 429:
-            print("⚠️ 429エラー、5秒待って再試行...")
+    for attempt in range(retries):
+        try:
+            res = requests.get(url, headers=headers)
+            print(f"🔍 Checking release_id: {release_id}")
+            print(f"📦 API Response: {res.status_code}")
+            if res.status_code == 200:
+                return res.json().get("num_for_sale", 0)
+            if res.status_code == 429:
+                print("⚠️ 429 → 5秒待って再試行")
+                time.sleep(5)
+                continue
+            # 404などその他
+            print(res.text)
+            return 0
+        except Exception as e:
+            print(f"⚠️ 接続エラー: {e}")
             time.sleep(5)
-            continue
-        print(r.text)
-        break
-    print("❌ リトライ上限到達スキップ", release_id)
+    print(f"❌ リトライ上限到達スキップ {release_id}")
     return 0
 
-# --- メール送信 ---
-def send_email(subject, body):
-    msg = MIMEText(body)
-    msg['Subject'] = subject
-    msg['From'] = EMAIL_FROM
-    msg['To'] = EMAIL_TO
-    try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(EMAIL_FROM, EMAIL_PASS)
-            server.send_message(msg)
-        print("✅ 通知メール送信完了")
-    except Exception as e:
-        print("❌ メール送信失敗:", e)
-
-# --- Discord送信 ---
-def send_discord(content):
-    if not DISCORD_WEBHOOK_URL:
+# —————— 通知送信 ——————
+def send_notifications(messages):
+    if not messages:
+        print("📝 通知対象なし")
         return
+
+    now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+    subject = f"{now} 新規出品通知（{len(messages)}件）"
+    body = subject + "\n\n" + "\n\n".join(messages)
+
+    # --- メール送信 ---
     try:
-        r = requests.post(DISCORD_WEBHOOK_URL, json={'content': content})
-        if r.status_code == 204:
-            print("✅ Discord送信完了")
-        else:
-            print("❌ Discord送信失敗:", r.status_code)
+        msg = MIMEText(body)
+        msg['Subject']= subject
+        msg['From']   = EMAIL_FROM
+        msg['To']     = EMAIL_TO
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(EMAIL_FROM, EMAIL_PASS)
+            smtp.send_message(msg)
+        print("✅ 通知メールを送信しました。")
     except Exception as e:
-        print("❌ Discordエラー:", e)
+        print(f"❌ メール送信に失敗しました: {e}")
 
-# --- メイン処理 ---
+    # --- Discord通知 ---
+    try:
+        payload = {"content": body}
+        res = requests.post(DISCORD_WEBHOOK, json=payload)
+        if res.status_code == 204:
+            print("✅ Discord通知を送信しました。")
+        else:
+            print(f"❌ Discord通知に失敗: {res.status_code}")
+    except Exception as e:
+        print(f"❌ Discord送信エラー: {e}")
+
 def main():
+    want_ids = get_wantlist_ids()
+    print(f"取得したWantlist件数: {len(want_ids)}")
+
+    # Firestoreから履歴読み込み
     notified = load_notified_counts()
-    first_run = len(notified) == 0  # 初回実行判定
-    items = get_wantlist_items()
-    print(f"取得したWantlist件数: {len(items)}")
+    is_first_run = (notified == {})
 
-    messages = []
-    now = datetime.now(JST).strftime('%Y-%m-%d %H:%M')
+    # 初回実行時は通知せず、履歴だけ作って終了
+    if is_first_run:
+        print("初回実行のため通知をスキップし、履歴を初期化します。")
+        for rid in want_ids:
+            notified[rid] = get_num_for_sale(rid)
+            time.sleep(1)
+        save_notified_counts(notified)
+        return
 
-    for item in items:
-        rid = str(item['release_id'])
-        count = get_num_for_sale(rid)
-        time.sleep(1)
+    # 差分検出ループ
+    new_messages = []
+    for rid in want_ids:
+        current = get_num_for_sale(rid)
         prev = notified.get(rid)
-        # 初回実行時は記録のみ行い、通知はスキップ
-        if not first_run and prev is not None and count > prev:
-            messages.append(f"💿 {item['title']} - {item['artist']}\n{item['uri']}\n出品数: {count} (前回: {prev})\n")
-        # 記録を更新
-        notified[rid] = count
+        # 履歴にない商品はスキップ（新Wantlist追加時の初回のみ記録）
+        if prev is None:
+            print(f"ℹ️ New item detected, skip notifications this run: {rid}")
+            notified[rid] = current
+            time.sleep(1)
+            continue
 
-    # 通知送信
-    if messages:
-        header = f"📦 {now} 新規出品通知（{len(messages)}件）\n"
-        body = header + '\n'.join(messages)
-        send_email("【DISCOGS】Wantlist出品追加まとめ", body)
-        send_discord(body)
+        # 増加時だけ通知
+        if current > prev:
+            url = f"https://www.discogs.com/release/{rid}"
+            msg = f"💿 {url.split('/')[-1].replace('-', ' ')}\n{url}\n出品数: {current} (前回: {prev})"
+            new_messages.append(msg)
+        # 減少 or 同数も履歴は更新
+        notified[rid] = current
+        time.sleep(1)
 
+    # Firestoreに履歴更新
     save_notified_counts(notified)
+    # まとめて通知
+    send_notifications(new_messages)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
