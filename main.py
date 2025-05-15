@@ -122,6 +122,12 @@ def main():
         num_for_sale = get_num_for_sale(release_id)
         time.sleep(1)
 
+        # Firestoreに記録がない場合は初回として記録だけして通知は出さない
+        if release_id not in notified_counts:
+            print(f"📝 初回記録: {release_id} → {num_for_sale}件")
+            notified_counts[release_id] = num_for_sale
+            continue
+
         prev_count = notified_counts.get(release_id, 0)
         if num_for_sale > prev_count:
             msg = f"💿 {title} - {artist}\n{uri}\n出品数: {num_for_sale} (前回: {prev_count})\n"
