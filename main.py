@@ -56,7 +56,7 @@ def get_wantlist_ids():
         page += 1
     return ids
 
-# —————— 出品数とタイトル取得（リトライ付き） ——————
+# —————— 出品数とタイトル取得（アーティスト名付き） ——————
 def get_num_for_sale_and_title(release_id, retries=3):
     url = f'https://api.discogs.com/releases/{release_id}'
     headers = {'Authorization': f'Discogs token={DISCOGS_TOKEN}'}
@@ -67,7 +67,16 @@ def get_num_for_sale_and_title(release_id, retries=3):
             print(f"📦 API Response: {res.status_code}")
             if res.status_code == 200:
                 data = res.json()
-                return data.get("num_for_sale", 0), data.get("title", "No Title")
+                num = data.get("num_for_sale", 0)
+
+                # アーティスト名取得
+                artists = [a.get("name", "") for a in data.get("artists", [])]
+                artist_name = ", ".join(artists).strip()
+                title = data.get("title", "").strip()
+                full_title = f"{artist_name} - {title}" if artist_name else title
+
+                return num, full_title
+
             if res.status_code == 429:
                 print("⚠️ 429 Too Many Requests → 5秒待って再試行")
                 time.sleep(5)
@@ -91,7 +100,7 @@ def send_notifications(messages):
 
     now_str = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
     subject = f"{now_str} 新規出品通知（{len(messages)}件）"
-    body = subject + "\n" + "\n\n".join(messages)  # ← 空行1行削除！
+    body = subject + "\n" + "\n\n".join(messages)
 
     # メール送信
     try:
